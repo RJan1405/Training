@@ -338,7 +338,11 @@ async function loadChatWindow(type, id) {
     const mediaToggleBtn = '<button id="media-toggle-header-btn" title="Media" style="margin-left:6px;border:none;background:#e5e7eb;color:#111827;border-radius:6px;padding:6px 8px;cursor:pointer">🖼️</button>';
     let callBtns = '';
     if (type === 'user') {
-      callBtns = '';
+      callBtns = `
+        <div class="call-buttons">
+          <button id="voice-call-btn" class="call-btn" title="Voice Call">📞</button>
+          <button id="video-call-btn" class="call-btn" title="Video Call">📹</button>
+        </div>`;
     } else {
       callBtns = `
         <div class="call-buttons">
@@ -775,7 +779,42 @@ function createMessageElement(msg) {
 
   const textEl = document.createElement('div');
   textEl.className = 'message-content';
-  textEl.textContent = msg.text || '';
+
+  // Check for Meeting Invite
+  if (msg.text === '[PROJECT_MEETING_INVITE]') {
+    const inviteCard = document.createElement('div');
+    inviteCard.className = 'meeting-invite-card';
+    inviteCard.style.background = '#eff6ff';
+    inviteCard.style.border = '1px solid #bfdbfe';
+    inviteCard.style.borderRadius = '8px';
+    inviteCard.style.padding = '12px';
+    inviteCard.style.marginTop = '4px';
+    inviteCard.style.display = 'flex';
+    inviteCard.style.flexDirection = 'column';
+    inviteCard.style.gap = '8px';
+
+    const title = document.createElement('div');
+    title.innerHTML = '<strong>🎥 Video Meeting Started</strong>';
+    title.style.fontSize = '14px';
+    title.style.color = '#1e3a8a';
+
+    const joinBtn = document.createElement('button');
+    joinBtn.textContent = 'Join Meeting';
+    joinBtn.style.background = '#2563eb';
+    joinBtn.style.color = 'white';
+    joinBtn.style.border = 'none';
+    joinBtn.style.padding = '8px 16px';
+    joinBtn.style.borderRadius = '6px';
+    joinBtn.style.fontWeight = '600';
+    joinBtn.style.cursor = 'pointer';
+    joinBtn.onclick = () => joinMeetingFromInvite();
+
+    inviteCard.appendChild(title);
+    inviteCard.appendChild(joinBtn);
+    textEl.appendChild(inviteCard);
+  } else {
+    textEl.textContent = msg.text || '';
+  }
   content.appendChild(textEl);
 
   const persistedReply = msg.id !== undefined ? getReplyForMessage(msg.id) : null;
@@ -2365,7 +2404,7 @@ function setupCallButtons() {
   if (aBtn) aBtn.onclick = () => startOutgoingCall('audio');
 
   const meetBtn = document.getElementById('project-meeting-btn');
-  if (meetBtn) meetBtn.onclick = openProjectMeeting;
+  if (meetBtn) meetBtn.onclick = confirmHostMeeting;
 
   const endBtn = document.getElementById('call-end-btn');
   const acceptBtn = document.getElementById('call-accept-btn');
@@ -2598,6 +2637,95 @@ function sendProjectRTC(payload) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   const msg = Object.assign({ type: 'rtc' }, payload);
   ws.send(JSON.stringify(msg));
+}
+
+function confirmHostMeeting() {
+  if (currentChatType !== 'project' || !currentChatId) return;
+
+  // Simple custom modal for confirmation
+  const overlay = document.createElement('div');
+  overlay.id = 'host-meeting-overlay';
+  overlay.style.position = 'fixed';
+  overlay.style.inset = '0';
+  overlay.style.background = 'rgba(0,0,0,0.5)';
+  overlay.style.display = 'flex';
+  overlay.style.alignItems = 'center';
+  overlay.style.justifyContent = 'center';
+  overlay.style.zIndex = '10000';
+
+  const modal = document.createElement('div');
+  modal.style.background = 'white';
+  modal.style.padding = '24px';
+  modal.style.borderRadius = '12px';
+  modal.style.textAlign = 'center';
+  modal.style.boxShadow = '0 20px 25px -5px rgba(0,0,0,0.1)';
+  modal.style.maxWidth = '90vw';
+  modal.style.width = '320px';
+
+  const title = document.createElement('h3');
+  title.textContent = 'Start Video Meeting?';
+  title.style.fontSize = '18px';
+  title.style.fontWeight = '700';
+  title.style.marginBottom = '12px';
+  title.style.color = '#111827';
+
+  const text = document.createElement('p');
+  text.textContent = 'This will start a meeting and notify everyone in the group to join.';
+  text.style.fontSize = '14px';
+  text.style.color = '#6b7280';
+  text.style.marginBottom = '20px';
+
+  const btnGroup = document.createElement('div');
+  btnGroup.style.display = 'flex';
+  btnGroup.style.gap = '10px';
+  btnGroup.style.justifyContent = 'center';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.textContent = 'Cancel';
+  cancelBtn.style.padding = '8px 16px';
+  cancelBtn.style.border = '1px solid #d1d5db';
+  cancelBtn.style.background = 'white';
+  cancelBtn.style.borderRadius = '6px';
+  cancelBtn.style.cursor = 'pointer';
+  cancelBtn.onclick = () => overlay.remove();
+
+  const hostBtn = document.createElement('button');
+  hostBtn.textContent = 'Host Meeting';
+  hostBtn.style.padding = '8px 16px';
+  hostBtn.style.border = 'none';
+  hostBtn.style.background = '#2563eb';
+  hostBtn.style.color = 'white';
+  hostBtn.style.borderRadius = '6px';
+  hostBtn.style.fontWeight = '600';
+  hostBtn.style.cursor = 'pointer';
+  hostBtn.onclick = () => {
+    overlay.remove();
+    startHostingMeeting();
+  };
+
+  btnGroup.appendChild(cancelBtn);
+  btnGroup.appendChild(hostBtn);
+  modal.appendChild(title);
+  modal.appendChild(text);
+  modal.appendChild(btnGroup);
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+}
+
+function startHostingMeeting() {
+  openProjectMeeting();
+  // Send invite
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      type: 'message',
+      project_id: currentChatId,
+      text: '[PROJECT_MEETING_INVITE]'
+    }));
+  }
+}
+
+function joinMeetingFromInvite() {
+  openProjectMeeting();
 }
 
 
