@@ -813,11 +813,21 @@ function createMessageElement(msg) {
     inviteCard.appendChild(joinBtn);
     textEl.appendChild(inviteCard);
   } else if (msg.text === '[PROJECT_MEETING_ENDED]') {
-    // Hide this message
-    div.style.display = 'none';
+    const endCard = document.createElement('div');
+    endCard.style.padding = '8px 12px';
+    endCard.style.background = '#f3f4f6';
+    endCard.style.border = '1px solid #d1d5db';
+    endCard.style.borderRadius = '8px';
+    endCard.style.color = '#6b7280';
+    endCard.style.fontSize = '13px';
+    endCard.style.fontWeight = '500';
+    endCard.style.display = 'flex';
+    endCard.style.alignItems = 'center';
+    endCard.style.gap = '8px';
+    endCard.innerHTML = '<span>🏁</span> <span>Video meeting ended</span>';
+    textEl.appendChild(endCard);
 
-    // Find the last invite card and mark it as ended
-    // We delay slightly to ensure DOM is ready if loading history
+    // Disable the last invite card
     setTimeout(() => {
       const container = document.getElementById('messages-container');
       if (container) {
@@ -825,11 +835,13 @@ function createMessageElement(msg) {
         if (invites.length > 0) {
           const last = invites[invites.length - 1];
           last.classList.add('ended');
-          last.style.background = '#f3f4f6';
-          last.style.border = '1px solid #d1d5db';
-          last.innerHTML = '<strong>🏁 Meeting Ended</strong>';
-          last.style.color = '#6b7280';
-          last.style.textAlign = 'center';
+          const btn = last.querySelector('button');
+          if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'Meeting Ended';
+            btn.style.background = '#9ca3af';
+            btn.style.cursor = 'not-allowed';
+          }
         }
       }
     }, 10);
@@ -2439,6 +2451,20 @@ function setupCallButtons() {
   const camBtn = document.getElementById('toggle-cam-btn');
   if (micBtn) micBtn.onclick = () => { if (rtcLocalStream) rtcLocalStream.getAudioTracks().forEach(t => t.enabled = !t.enabled); };
   if (camBtn) camBtn.onclick = () => { if (rtcLocalStream) rtcLocalStream.getVideoTracks().forEach(t => t.enabled = !t.enabled); };
+
+  // Project Meeting Controls
+  const mCam = document.getElementById('meeting-cam-btn');
+  const mMic = document.getElementById('meeting-mic-btn');
+  const mShare = document.getElementById('meeting-share-btn');
+  const mInvite = document.getElementById('meeting-invite-btn');
+
+  if (mCam) mCam.onclick = toggleMeetingCam;
+  if (mMic) mMic.onclick = toggleMeetingMic;
+  if (mShare) mShare.onclick = toggleScreenShare;
+  if (mInvite) mInvite.onclick = inviteToMeeting;
+
+  const mExpand = document.getElementById('meeting-expand-btn');
+  if (mExpand) mExpand.onclick = () => toggleMeetingSize();
 }
 
 /* ============================================================
@@ -2447,6 +2473,8 @@ function setupCallButtons() {
 
 let projectPeers = {}; // { userId: RTCPeerConnection }
 let projectLocalStream = null;
+let isScreenSharing = false;
+let originalVideoTrack = null;
 
 async function openProjectMeeting() {
   if (currentChatType !== 'project' || !currentChatId) return;
@@ -2480,6 +2508,8 @@ async function openProjectMeeting() {
 
   // 3. Show Overlay
   overlay.classList.remove('hidden');
+  // Default to minimized ("small")
+  overlay.classList.add('minimized');
 
   // 4. broadcast JOIN request to all group members
   sendProjectRTC({ action: 'join_request' });
@@ -2879,3 +2909,150 @@ function connectNotifySocket() {
     setTimeout(connectNotifySocket, backoff);
   };
 }
+
+/* ============================================================
+   MEETING CONTROLS
+   ============================================================ */
+
+function toggleMeetingCam() {
+  if (projectLocalStream) {
+    const vidTrack = projectLocalStream.getVideoTracks()[0];
+    if (vidTrack) {
+      vidTrack.enabled = !vidTrack.enabled;
+      updateMeetingBtnState('meeting-cam-btn', vidTrack.enabled);
+    }
+  }
+}
+
+function toggleMeetingMic() {
+  if (projectLocalStream) {
+    const audTrack = projectLocalStream.getAudioTracks()[0];
+    if (audTrack) {
+      audTrack.enabled = !audTrack.enabled;
+      updateMeetingBtnState('meeting-mic-btn', audTrack.enabled);
+    }
+  }
+}
+
+function updateMeetingBtnState(id, enabled) {
+  const btn = document.getElementById(id);
+  if (!btn) return;
+  if (enabled) {
+    btn.style.background = '';
+    btn.style.color = '';
+  } else {
+    btn.style.background = '#dc2626';
+    btn.style.color = 'white';
+    btn.style.borderColor = '#b91c1c';
+  }
+}
+
+async function toggleScreenShare() {
+  if (isScreenSharing) {
+    stopScreenShare();
+    return;
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+    const screenTrack = stream.getVideoTracks()[0];
+
+    // Keep reference to original cam track
+    if (projectLocalStream) {
+      originalVideoTrack = projectLocalStream.getVideoTracks()[0];
+    }
+
+    // Replace track in local stream (for self view)
+    if (projectLocalStream) {
+      projectLocalStream.removeTrack(originalVideoTrack);
+      projectLocalStream.addTrack(screenTrack);
+    }
+
+    // Update Local Video Element
+    const localVideo = document.getElementById(`video-${currentUserId}`);
+    if (localVideo) localVideo.srcObject = projectLocalStream;
+
+    // Replace track in all PeerConnections
+    Object.values(projectPeers).forEach(pc => {
+      const sender = pc.getSenders().find(s => s.track.kind === 'video');
+      if (sender) {
+        sender.replaceTrack(screenTrack);
+      }
+    });
+
+    // Handle user stopping share via browser UI
+    screenTrack.onended = () => stopScreenShare();
+
+    isScreenSharing = true;
+    const btn = document.getElementById('meeting-share-btn');
+    if (btn) {
+      btn.style.background = '#2563eb'; // Blue to indicate active
+      btn.style.color = 'white';
+    }
+
+  } catch (e) {
+    console.error('Error sharing screen:', e);
+  }
+}
+
+function stopScreenShare() {
+  if (!isScreenSharing) return;
+
+  // Stop screen track
+  const screenTrack = projectLocalStream.getVideoTracks()[0];
+  if (screenTrack) screenTrack.stop();
+
+  // Restore camera track
+  if (originalVideoTrack) {
+    projectLocalStream.removeTrack(screenTrack);
+    projectLocalStream.addTrack(originalVideoTrack);
+    // Important: Re-enable if it was enabled before? Assuming yes.
+    originalVideoTrack.enabled = true;
+  }
+
+  // Update Local Video
+  const localVideo = document.getElementById(`video-${currentUserId}`);
+  if (localVideo) localVideo.srcObject = projectLocalStream;
+
+  // Replace track in peers
+  Object.values(projectPeers).forEach(pc => {
+    const sender = pc.getSenders().find(s => s.track.kind === 'video');
+    if (sender && originalVideoTrack) {
+      sender.replaceTrack(originalVideoTrack);
+    }
+  });
+
+  isScreenSharing = false;
+  originalVideoTrack = null;
+  const btn = document.getElementById('meeting-share-btn');
+  if (btn) {
+    btn.style.background = '';
+    btn.style.color = '';
+  }
+}
+
+function inviteToMeeting() {
+  // 1. Send invite to group chat
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      type: 'message',
+      project_id: currentChatId,
+      text: '[PROJECT_MEETING_INVITE]'
+    }));
+  }
+
+  // 2. Copy link to clipboard
+  const uniqueLink = `${window.location.origin}/chat/project/${currentProjectId}`;
+  navigator.clipboard.writeText(`Join my meeting: ${uniqueLink}`).then(() => {
+    alert('Invite sent to group & Link copied to clipboard!');
+  }).catch(() => {
+    alert('Invite sent to group!');
+  });
+}
+
+function toggleMeetingSize() {
+  const overlay = document.getElementById('meeting-overlay');
+  if (overlay) overlay.classList.toggle('minimized');
+}
+
+
