@@ -110,6 +110,31 @@ class UserViewSet(viewsets.ModelViewSet):
         BlockedUser.objects.filter(blocker=request.user, blocked=target).delete()
         return Response({'unblocked_user_id': target.id})
 
+    @action(detail=False, methods=['post'], parser_classes=[MultiPartParser, FormParser])
+    def upload_avatar(self, request):
+        """Upload or update user avatar."""
+        user = request.user
+        if 'avatar' not in request.FILES:
+            return Response({'error': 'No avatar file provided'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        f = request.FILES['avatar']
+        # Simple validation
+        if f.size > 5 * 1024 * 1024:
+             return Response({'error': 'File too large (max 5MB)'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            profile = user.profile
+        except UserProfile.DoesNotExist:
+            from .models import UserProfile
+            profile = UserProfile.objects.create(user=user)
+
+        profile.avatar = f
+        profile.save()
+        
+        # Return the new avatar URL
+        avatar_url = request.build_absolute_uri(profile.avatar.url)
+        return Response({'avatar_url': avatar_url, 'message': 'Avatar updated successfully'})
+
     @action(detail=False, methods=['get'])
     def blocked(self, request):
         """List IDs of users blocked by current user."""

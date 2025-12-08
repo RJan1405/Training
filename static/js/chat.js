@@ -211,7 +211,17 @@ function createUnifiedUserItem(item) {
 
   const avatar = document.createElement('div');
   avatar.className = 'avatar';
-  avatar.textContent = (item.user.first_name?.[0] || item.user.username?.[0] || 'U').toUpperCase();
+  const avatarUrl = item.user.profile?.avatar;
+  if (avatarUrl) {
+    // Determine full URL (if relative, prepend origin or rely on browser)
+    // The backend serializer usually returns absolute or relative URL.
+    avatar.style.backgroundImage = `url('${avatarUrl}')`;
+    avatar.style.backgroundSize = 'cover';
+    avatar.style.backgroundPosition = 'center';
+    avatar.textContent = '';
+  } else {
+    avatar.textContent = (item.user.first_name?.[0] || item.user.username?.[0] || 'U').toUpperCase();
+  }
 
   const info = document.createElement('div');
   info.className = 'chat-info';
@@ -322,12 +332,14 @@ async function loadChatWindow(type, id) {
     let endpoint = '';
     let headerName = '';
     let isOnline = false;
+    let avatarUrl = null;
 
     if (type === 'user') {
       endpoint = `${API_BASE}/messages/user/${id}/`;
       const user = await (await fetch(`${API_BASE}/users/${id}/`, { headers: defaultHeaders() })).json();
       headerName = user.first_name ? `${user.first_name} ${user.last_name}` : user.username;
       isOnline = !!(user.profile && user.profile.is_online);
+      if (user.profile && user.profile.avatar) avatarUrl = user.profile.avatar;
     } else {
       endpoint = `${API_BASE}/messages/project/${id}/`;
       const project = await (await fetch(`${API_BASE}/projects/${id}/`, { headers: defaultHeaders() })).json();
@@ -364,9 +376,15 @@ async function loadChatWindow(type, id) {
         </div>`;
     }
 
+    let headerAvatar = '';
+    if (avatarUrl) {
+      headerAvatar = `<img src="${avatarUrl}" style="width:32px; height:32px; border-radius:50%; margin-right:8px; object-fit:cover;">`;
+    }
+
     chatWindow.innerHTML = `
       <div class="chat-header">
         <div class="chat-header-title">
+          ${headerAvatar}
           <h3>${escapeHtml(headerName)}</h3>
           <span class="connection-status ${statusClass}">${statusText}</span>
           <button id="message-search-btn" style="display:flex;align-items:center;justify-content:center;margin-left:8px;border:none;background:#e5e7eb;color:#374151;border-radius:8px;width:32px;height:32px;cursor:pointer;transition:all 0.2s">
@@ -2605,19 +2623,21 @@ window.closeMeetingOverlay = function () {
   // Check if I was the last one (before clearing peers)
   const wasLast = Object.keys(projectPeers).length === 0;
 
-  // Safety: If meeting closed within 3 seconds of start, it might be a glitch or accidental.
-  // We suppress the "Meeting Ended" message in this case to prevent confusing users.
-  // Also, ONLY send ended if we were actually IN the meeting (wasActive).
-  const duration = Date.now() - (window.meetingStartTime || 0);
-  console.log(`❌ closeMeetingOverlay called. Duration: ${duration}ms, wasLast: ${wasLast}, wasActive: ${wasActive}`);
+  // Safety: We suppress the "Meeting Ended" message if the user wasn't actually active (no stream),
+  // which prevents ghost/glitch endings.
+  // We removed the duration check because if a user manually clicks End quickly, they expect it to end.
+  console.log(`❌ closeMeetingOverlay checks: wasLast=${wasLast}, wasActive=${wasActive}`);
 
-  if (wasLast && duration > 3000 && wasActive) {
+  if (wasLast && wasActive) {
     if (ws && ws.readyState === WebSocket.OPEN) {
+      console.log('✅ Sending [PROJECT_MEETING_ENDED]');
       ws.send(JSON.stringify({
         type: 'message',
         project_id: currentChatId,
         text: '[PROJECT_MEETING_ENDED]'
       }));
+    } else {
+      console.warn('❌ WS not open, cannot send Ended message');
     }
   }
 
@@ -3275,7 +3295,22 @@ function setupGroupCreationListeners() {
       e.stopPropagation();
       if (dropdown) dropdown.classList.remove('active');
       // For now, treat Host Meeting like creating a group to meet in
-      openGroupCreationModal();
+    };
+  }
+
+  const avatarItem = document.getElementById('menu-set-avatar');
+  const avatarInput = document.getElementById('avatar-input');
+  if (avatarItem && avatarInput) {
+    avatarItem.onclick = (e) => {
+      e.stopPropagation();
+      if (dropdown) dropdown.classList.remove('active');
+      avatarInput.click();
+    };
+
+    avatarInput.onchange = async (e) => {
+      if (e.target.files && e.target.files[0]) {
+        await uploadAvatar(e.target.files[0]);
+      }
     };
   }
 
@@ -3593,5 +3628,34 @@ function closeGroupCreationModal() {
     overlay.classList.add('hidden');
     overlay.style.display = 'none';
     resetGroupCreationForm();
+  }
+}
+
+async function uploadAvatar(file) {
+  const formData = new FormData();
+  formData.append('avatar', file);
+
+  try {
+    const res = await fetch(`${API_BASE}/users/upload_avatar/`, {
+      method: 'POST',
+      headers: {
+        'X-CSRFToken': getCSRFToken()
+      },
+      body: formData
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      alert('Profile picture updated!');
+      // Reload unified chats to refresh avatar
+      loadUnifiedChats();
+      return data;
+    } else {
+      const err = await res.json();
+      alert(err.error || 'Failed to upload avatar');
+    }
+  } catch (e) {
+    console.error(e);
+    alert('Error uploading avatar');
   }
 }
