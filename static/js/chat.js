@@ -379,6 +379,14 @@ async function loadChatWindow(type, id) {
     let headerAvatar = '';
     if (avatarUrl) {
       headerAvatar = `<img src="${avatarUrl}" style="width:32px; height:32px; border-radius:50%; margin-right:8px; object-fit:cover;">`;
+    } else {
+      // Default avatar with initials
+      const initials = (headerName.split(' ').map(n => n[0]).join('') || headerName[0] || '?').substring(0, 2).toUpperCase();
+      headerAvatar = `
+        <div style="width:32px; height:32px; border-radius:50%; margin-right:8px; background:linear-gradient(135deg, #2563eb 0%, #3b82f6 100%); color:white; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:12px; border:1px solid #1e40af;">
+          ${initials}
+        </div>
+      `;
     }
 
     chatWindow.innerHTML = `
@@ -1643,7 +1651,9 @@ async function loadProjectMembers(projectId) {
           username: member.username,
           first_name: member.first_name,
           last_name: member.last_name,
-          is_online: member.profile?.is_online || false
+
+          is_online: member.profile?.is_online || false,
+          avatar: member.profile?.avatar || null
         });
       });
     }
@@ -1707,7 +1717,18 @@ function createMemberItem(member) {
   const initials = member.first_name
     ? member.first_name[0].toUpperCase() + (member.last_name?.[0]?.toUpperCase() || '')
     : member.username[0].toUpperCase();
-  avatar.textContent = initials;
+
+  if (member.avatar) {
+    const img = document.createElement('img');
+    img.src = member.avatar;
+    img.style.width = '100%';
+    img.style.height = '100%';
+    img.style.objectFit = 'cover';
+    img.style.borderRadius = '50%';
+    avatar.appendChild(img);
+  } else {
+    avatar.textContent = initials;
+  }
 
   const badge = document.createElement('div');
   badge.className = `status-badge ${member.is_online ? 'online' : ''}`;
@@ -1805,6 +1826,8 @@ async function openMemberProfile(userId) {
       if (user.profile && user.profile.avatar) {
         const img = document.createElement('img');
         img.src = user.profile.avatar;
+        img.style.cursor = 'pointer';
+        img.onclick = () => openAvatarPreview(user.profile.avatar);
         avatarEl.appendChild(img);
       } else {
         avatarEl.textContent = initials;
@@ -1855,6 +1878,31 @@ async function openMemberProfile(userId) {
   const closeBtn = document.getElementById('profile-close');
   if (closeBtn) closeBtn.onclick = closeProfileModal;
   overlay.onclick = (evt) => { if (evt.target === overlay) closeProfileModal(); };
+}
+
+function openAvatarPreview(url) {
+  const overlay = document.getElementById('avatar-preview-overlay');
+  const img = document.getElementById('avatar-preview-img');
+  const closeBtn = document.getElementById('avatar-preview-close');
+
+  if (overlay && img) {
+    img.src = url;
+    overlay.classList.remove('hidden');
+    overlay.style.display = 'flex';
+
+    if (closeBtn) closeBtn.onclick = closeAvatarPreview;
+    overlay.onclick = (e) => {
+      if (e.target === overlay) closeAvatarPreview();
+    };
+  }
+}
+
+function closeAvatarPreview() {
+  const overlay = document.getElementById('avatar-preview-overlay');
+  if (overlay) {
+    overlay.classList.add('hidden');
+    overlay.style.display = 'none';
+  }
 }
 
 function closeProfileModal() {

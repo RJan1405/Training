@@ -2159,6 +2159,16 @@
   </div>
 </div>
 
+<div id="avatar-preview-overlay" class="compose-overlay hidden"
+  style="align-items:center; justify-content:center; background:rgba(0,0,0,0.85); z-index:2000;">
+  <div style="position:relative; max-width:90vw; max-height:90vh;">
+    <button id="avatar-preview-close"
+      style="position:absolute; top:-40px; right:-40px; background:none; border:none; color:white; font-size:24px; cursor:pointer;">✕</button>
+    <img id="avatar-preview-img" src=""
+      style="max-width:100%; max-height:80vh; border-radius:8px; box-shadow:0 0 20px rgba(0,0,0,0.5);">
+  </div>
+</div>
+
 <script src="{% static 'js/chat.js' %}?v={{ turn_config|length|add:20 }}"></script>
 <script src="{% static 'js/search.js' %}"></script>
 
