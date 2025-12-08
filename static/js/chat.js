@@ -77,8 +77,7 @@ document.addEventListener('DOMContentLoaded', () => {
     console.error('❌ User ID not found in page!');
   }
 
-  loadRecentChats();
-  loadProjects();
+  loadUnifiedChats();
   setupEventListeners();
 
   try {
@@ -91,31 +90,43 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 /* ============================================================
-   RECENT CHATS (LEFT SIDEBAR) - CLEAN, NO METADATA
+   UNIFIED SIDEBAR (Recents + Projects)
    ============================================================ */
 
-async function loadRecentChats() {
+async function loadUnifiedChats() {
   try {
     const url = `${API_BASE}/messages/recent_chats/`;
     const res = await fetch(url, { headers: defaultHeaders() });
     if (!res.ok) throw new Error(`Status ${res.status}`);
-    const chats = await res.json();
+    const items = await res.json();
 
-    // Load chat metadata (for right sidebar display later)
-    for (const chat of chats) {
-      await loadChatMetadata('user', chat.user.id);
-    }
+    // Cache metadata maps immediately
+    items.forEach(item => {
+      const type = item.type;
+      const id = type === 'user' ? item.user.id : item.project.id;
+      const key = `${type}_${id}`;
+      if (!chatMetadata.has(key)) {
+        chatMetadata.set(key, {
+          filesCount: 0,
+          lastActivity: item.last_message_timestamp,
+          lastMessage: item.last_message,
+          messageCount: 0,
+          files: []
+        });
+      }
+    });
 
-    renderRecentChats(chats);
+    renderUnifiedChats(items);
   } catch (err) {
-    console.error('❌ Error loading recent chats:', err);
+    console.error('❌ Error loading chats:', err);
   }
 }
 
 async function loadChatMetadata(type, id) {
   try {
     const key = `${type}_${id}`;
-    if (chatMetadata.has(key)) return; // Already loaded
+    // If we have files, assume we loaded full metadata
+    if (chatMetadata.has(key) && chatMetadata.get(key).files.length > 0) return;
 
     let url = '';
     if (type === 'user') {
@@ -147,7 +158,6 @@ async function loadChatMetadata(type, id) {
         }
         if (msg.timestamp && (!lastActivityTime || new Date(msg.timestamp) > new Date(lastActivityTime))) {
           lastActivityTime = msg.timestamp;
-          // Clean text for preview
           if (msg.text === '[PROJECT_MEETING_INVITE]') lastMessageText = '🎥 Meeting Started';
           else if (msg.text === '[PROJECT_MEETING_ENDED]') lastMessageText = '🏁 Meeting Ended';
           else lastMessageText = msg.text || (msg.file_url ? '📎 Attachment' : '');
@@ -163,17 +173,10 @@ async function loadChatMetadata(type, id) {
       files: files
     });
 
-    console.log(`✅ Chat metadata loaded for ${type} ${id}:`, chatMetadata.get(key));
-
-    // Trigger re-render if needed
+    // Update preview if element specifically exists for projects
     if (type === 'project') {
-      const pList = document.getElementById('projects-list');
-      // We can't easily find the specific element without ID, but we can re-render if we want, 
-      // or just update if we had IDs. For now, calling renderProjects again might be heavy, 
-      // so we just let the next render pick it up, or rely on initial load.
-      // Better: update specific item if possible.
       const previewEl = document.getElementById(`project-preview-${id}`);
-      if (previewEl) previewEl.textContent = lastMessageText || 'No messages';
+      if (previewEl && lastMessageText) previewEl.textContent = lastMessageText;
     }
 
   } catch (err) {
@@ -181,119 +184,94 @@ async function loadChatMetadata(type, id) {
   }
 }
 
-function renderRecentChats(chats) {
-  const container = document.getElementById('recent-chats');
+function renderUnifiedChats(items) {
+  const container = document.getElementById('all-chats-list');
   if (!container) return;
 
   container.innerHTML = '';
-  if (!Array.isArray(chats) || chats.length === 0) {
-    container.innerHTML = '<p class="empty-state">No recent chats</p>';
+  if (!Array.isArray(items) || items.length === 0) {
+    container.innerHTML = '<p class="empty-state">No conversations</p>';
     return;
   }
 
-  chats.sort((a, b) => new Date(b.last_message_time) - new Date(a.last_message_time));
-  chats.forEach(chat => container.appendChild(createChatItem(chat)));
+  items.forEach(item => {
+    if (item.type === 'user' && item.user) {
+      container.appendChild(createUnifiedUserItem(item));
+    } else if (item.type === 'project' && item.project) {
+      container.appendChild(createUnifiedProjectItem(item));
+    }
+  });
 }
 
-function createChatItem(chat) {
+function createUnifiedUserItem(item) {
   const div = document.createElement('div');
   div.className = 'chat-item';
   div.tabIndex = 0;
-  div.onclick = () => openChat('user', chat.user.id);
+  div.onclick = () => openChat('user', item.user.id);
 
   const avatar = document.createElement('div');
   avatar.className = 'avatar';
-  avatar.textContent = (chat.user.first_name?.[0] || chat.user.username?.[0] || 'U').toUpperCase();
+  avatar.textContent = (item.user.first_name?.[0] || item.user.username?.[0] || 'U').toUpperCase();
 
   const info = document.createElement('div');
   info.className = 'chat-info';
 
   const name = document.createElement('div');
   name.className = 'chat-name';
-  name.textContent = chat.user.first_name ? `${chat.user.first_name} ${chat.user.last_name}` : chat.user.username;
+  name.textContent = item.user.first_name ? `${item.user.first_name} ${item.user.last_name}` : item.user.username;
 
   const preview = document.createElement('div');
   preview.className = 'chat-preview';
-  preview.textContent = chat.last_message || '(No messages)';
+  preview.textContent = item.last_message || '(No messages)';
 
   info.appendChild(name);
   info.appendChild(preview);
   div.appendChild(avatar);
   div.appendChild(info);
 
-  if (chat.unread_count && chat.unread_count > 0) {
+  if (item.unread_count > 0) {
     const badge = document.createElement('div');
     badge.className = 'unread-badge';
-    badge.textContent = chat.unread_count;
-    badge.dataset.forUser = chat.user.id;
+    badge.textContent = item.unread_count;
+    badge.dataset.forUser = item.user.id;
     div.appendChild(badge);
   }
 
   return div;
 }
 
-/* ============================================================
-   PROJECTS (LEFT SIDEBAR)
-   ============================================================ */
-
-async function loadProjects() {
-  try {
-    const url = `${API_BASE}/projects/`;
-    const res = await fetch(url, { headers: defaultHeaders() });
-    if (!res.ok) throw new Error(`Status ${res.status}`);
-    const projects = await res.json();
-
-    // Load metadata for projects
-    for (const p of projects) {
-      await loadChatMetadata('project', p.id);
-    }
-
-    renderProjects(projects);
-  } catch (err) {
-    console.error('❌ Error loading projects:', err);
-  }
-}
-
-function renderProjects(projects) {
-  const container = document.getElementById('projects-list');
-  if (!container) return;
-
-  container.innerHTML = '';
-  if (!Array.isArray(projects) || projects.length === 0) {
-    container.innerHTML = '<p class="empty-state">No projects</p>';
-    return;
-  }
-
-  projects.forEach(project => container.appendChild(createProjectItem(project)));
-}
-
-function createProjectItem(project) {
+function createUnifiedProjectItem(item) {
   const div = document.createElement('div');
   div.className = 'chat-item';
-  div.onclick = () => openChat('project', project.id);
+  div.onclick = () => openChat('project', item.project.id);
 
   const avatar = document.createElement('div');
   avatar.className = 'avatar project-avatar';
-  avatar.textContent = (project.name?.[0] || 'P').toUpperCase();
+  avatar.textContent = (item.project.name?.[0] || 'P').toUpperCase();
 
   const info = document.createElement('div');
   info.className = 'chat-info';
 
   const name = document.createElement('div');
   name.className = 'chat-name';
-  name.textContent = project.name;
+  name.textContent = item.project.name;
 
   const preview = document.createElement('div');
   preview.className = 'chat-preview';
-  preview.id = `project-preview-${project.id}`;
-
-  const meta = chatMetadata.get(`project_${project.id}`);
-  preview.textContent = meta?.lastMessage || `${project.members?.length || 0} members`;
+  preview.id = `project-preview-${item.project.id}`;
+  preview.textContent = item.last_message || 'No messages';
 
   info.appendChild(name);
   info.appendChild(preview);
   div.appendChild(avatar);
   div.appendChild(info);
+
+  if (item.unread_count > 0) {
+    const badge = document.createElement('div');
+    badge.className = 'unread-badge';
+    badge.textContent = item.unread_count;
+    div.appendChild(badge);
+  }
 
   return div;
 }

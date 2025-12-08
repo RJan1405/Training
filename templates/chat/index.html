@@ -1698,23 +1698,15 @@
           onclick="document.getElementById('user-search').value = ''; document.getElementById('search-results').classList.add('hidden');">✕</button>
         <div id="search-results" class="search-results hidden"></div>
       </div>
-      <button id="new-chat-btn" class="compose-btn" title="New chat">✎</button>
+      <!--<button id="new-chat-btn" class="compose-btn" title="New chat">✎</button>-->
+      <button id="create-group-btn" class="compose-btn" title="Create Group"
+        style="width:24px; height:24px; font-size:16px; border:none; background:transparent;">+</button>
     </div>
 
-    <!-- Recent Chats -->
+    <!-- Unified Chat List -->
     <div class="sidebar-section">
-      <div class="section-header">Recent Chats</div>
-      <div id="recent-chats" class="chat-list"></div>
-    </div>
-
-    <!-- Projects -->
-    <div class="sidebar-section">
-      <div class="section-header" style="display:flex; justify-content:space-between; align-items:center;">
-        <span>Projects</span>
-        <button id="create-group-btn" class="compose-btn" title="Create Group"
-          style="width:24px; height:24px; font-size:16px; border:none; background:transparent;">+</button>
-      </div>
-      <div id="projects-list" class="chat-list"></div>
+      <div class="section-header">Recent</div>
+      <div id="all-chats-list" class="chat-list"></div>
     </div>
   </div>
 

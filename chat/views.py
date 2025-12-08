@@ -11,10 +11,11 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.db.models import Q, F
 from django.views.generic import TemplateView
 from django.utils.decorators import method_decorator
+from django.utils import timezone
 from .models import Message, Project
 from .serializers import (
     MessageSerializer, UserSerializer, ProjectSerializer,
-    MessageCreateSerializer, RecentChatSerializer
+    MessageCreateSerializer, RecentChatSerializer, SidebarItemSerializer
 )
 from .forms import SignUpForm
 from django.contrib.auth import login
@@ -201,44 +202,77 @@ class MessageViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def recent_chats(self, request):
-        """Get recent conversations - FIXED VERSION"""
+        """Get unified recent conversations (DMs and Projects)"""
         
-        # Get all messages involving this user, ordered by most recent
+        items = []
+
+        # 1. PROCESS DIRECT MESSAGES
         recent_messages = Message.objects.filter(
             Q(sender=request.user) | Q(receiver=request.user)
         ).order_by('-timestamp', '-id')
 
-        # Group by conversation
         conversations_dict = {}
-        
         for msg in recent_messages:
-            # Determine who the other user is
-            if msg.sender == request.user and msg.receiver:
-                other_user = msg.receiver
-            elif msg.receiver == request.user and msg.sender:
-                other_user = msg.sender
-            else:
-                # Project message or no receiver, skip
+            if msg.project: 
+                continue # Skip project messages here, handled separately
+            
+            other_user = msg.receiver if msg.sender == request.user else msg.sender
+            if not other_user: 
                 continue
-
-            # Only add if we haven't seen this conversation yet
+            
+            # Avoid showing blocked users if necessary, but skipping for now to match old logic
+            
             if other_user.id not in conversations_dict:
-                # Count unread messages from this user
-                unread_count = Message.objects.filter(
-                    sender=other_user,
-                    receiver=request.user,
+                unread = Message.objects.filter(
+                    sender=other_user, 
+                    receiver=request.user, 
                     is_read=False
                 ).count()
-
+                
                 conversations_dict[other_user.id] = {
+                    'type': 'user',
                     'user': other_user,
-                    'last_message': msg,
-                    'unread_count': unread_count
+                    'project': None,
+                    # We pass the full user object to the serializer
+                    'last_message': msg.text[:200] if msg.text else ('Attachment' if msg.file else ''),
+                    'last_message_timestamp': msg.timestamp,
+                    'unread_count': unread
                 }
+        items.extend(conversations_dict.values())
 
-        # Serialize the conversations
-        conversations_list = list(conversations_dict.values())
-        serializer = RecentChatSerializer(conversations_list, many=True)
+        # 2. PROCESS PROJECTS
+        projects = Project.objects.filter(members=request.user)
+        for proj in projects:
+            last_msg = proj.messages.all().order_by('-timestamp', '-id').first()
+            
+            # Count unread messages in project (any message not by me that is unread)
+            # Note: Is_read logic in projects might benefit from a separate ReadReceipt model 
+            # effectively, currently Message.is_read is global. Assuming simplistic "unread" here.
+            unread = proj.messages.filter(is_read=False).exclude(sender=request.user).count()
+            
+            ts = last_msg.timestamp if last_msg else proj.created_at
+            txt = last_msg.text[:200] if last_msg and last_msg.text else ('Attachment' if last_msg and last_msg.file else '')
+            if not last_msg: 
+                txt = "Project Created"
+
+            items.append({
+                'type': 'project',
+                'project': proj,
+                'user': None,
+                'last_message': txt,
+                'last_message_timestamp': ts,
+                'unread_count': unread
+            })
+
+        # 3. SORT & SERIALIZE
+        def get_sort_key(item):
+            t = item.get('last_message_timestamp')
+            if not t: return timezone.now()
+            return t
+
+        items.sort(key=get_sort_key, reverse=True)
+
+        serializer = SidebarItemSerializer(items, many=True, context={'request': request})
         return Response(serializer.data)
 
 # ==================== PAGE VIEWS ====================

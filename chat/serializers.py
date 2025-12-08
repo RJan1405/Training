@@ -695,3 +695,18 @@ class ErrorResponseSerializer(serializers.Serializer):
         required=False
     )
     data = serializers.JSONField(required=False)
+
+
+# ====================== SIDEBAR ITEM SERIALIZER ======================
+
+class SidebarItemSerializer(serializers.Serializer):
+    """
+    Serializer for unified sidebar items (DMs and Projects).
+    """
+    type = serializers.ChoiceField(choices=['user', 'project'])
+    user = UserSerializer(required=False, allow_null=True)
+    project = ProjectSerializer(required=False, allow_null=True)
+    last_message = serializers.CharField(allow_null=True, required=False)
+    last_message_timestamp = serializers.DateTimeField(allow_null=True, required=False)
+    unread_count = serializers.IntegerField(default=0)
+
