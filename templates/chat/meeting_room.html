@@ -1,0 +1,467 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ meeting.title }} | Teams Meeting{% endblock %}
+
+{% block extra_css %}
+<style>
+    body {
+        margin: 0;
+        padding: 0;
+        background: #111827;
+        color: white;
+        height: 100vh;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+
+    #meeting-header {
+        height: 60px;
+        padding: 0 24px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: #1f2937;
+        border-bottom: 1px solid #374151;
+        z-index: 10;
+    }
+
+    .meeting-info h2 {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 600;
+    }
+
+    .meeting-info p {
+        margin: 0;
+        font-size: 12px;
+        color: #9ca3af;
+    }
+
+    #video-grid {
+        flex: 1;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 16px;
+        padding: 20px;
+        overflow-y: auto;
+        align-content: center;
+        justify-content: center;
+    }
+
+    .video-container {
+        position: relative;
+        background: #000;
+        border-radius: 12px;
+        overflow: hidden;
+        aspect-ratio: 16/9;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+    }
+
+    video {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+
+    .video-label {
+        position: absolute;
+        bottom: 12px;
+        left: 12px;
+        background: rgba(0, 0, 0, 0.6);
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 500;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    #controls-bar {
+        height: 80px;
+        background: #1f2937;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 16px;
+        padding: 0 24px;
+        border-top: 1px solid #374151;
+        z-index: 10;
+    }
+
+    .control-btn {
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        border: none;
+        background: #374151;
+        color: white;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s;
+    }
+
+    .control-btn:hover {
+        background: #4b5563;
+        transform: translateY(-2px);
+    }
+
+    .control-btn svg {
+        width: 24px;
+        height: 24px;
+    }
+
+    .control-btn.active {
+        background: #374151;
+    }
+
+    .control-btn.inactive {
+        background: #ef4444;
+    }
+
+    .control-btn.red-btn {
+        background: #ef4444;
+    }
+
+    .control-btn.red-btn:hover {
+        background: #dc2626;
+    }
+
+    /* Invite Modal */
+    .modal {
+        display: none;
+        position: fixed;
+        z-index: 100;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.6);
+        align-items: center;
+        justify-content: center;
+    }
+
+    .modal-content {
+        background-color: #1f2937;
+        padding: 24px;
+        border-radius: 12px;
+        width: 400px;
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3);
+        border: 1px solid #374151;
+    }
+
+    .btn-primary {
+        background: #2563eb;
+        color: white;
+        padding: 8px 16px;
+        border-radius: 6px;
+        border: none;
+        cursor: pointer;
+        font-weight: 500;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="meeting-header">
+    <div class="meeting-info">
+        <h2>{{ meeting.title }}</h2>
+        <p>{{ meeting.id }}</p>
+    </div>
+    <div style="display: flex; gap: 10px;">
+        <button class="btn-primary" onclick="showInviteModal()">Add People</button>
+    </div>
+</div>
+
+<div id="video-grid">
+    <!-- Local Video -->
+    <div class="video-container" id="video-container-local">
+        <video id="local-video" autoplay playsinline muted></video>
+        <div class="video-label">
+            <span>You</span>
+        </div>
+    </div>
+</div>
+
+<div id="controls-bar">
+    <button id="btn-mic" class="control-btn" title="Toggle Mic">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+        </svg>
+    </button>
+
+    <button id="btn-cam" class="control-btn" title="Toggle Camera">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+        </svg>
+    </button>
+
+    <button id="btn-leave" class="control-btn red-btn" title="Leave Meeting" onclick="leaveMeeting()">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+        </svg>
+    </button>
+</div>
+
+<!-- Invite Modal -->
+<div id="invite-modal" class="modal">
+    <div class="modal-content">
+        <h3 style="margin-top:0">Invite People</h3>
+        <p style="color:#9ca3af; font-size:14px; margin-bottom:16px;">Share this link with others to invite them.</p>
+        <div style="display:flex; gap:8px;">
+            <input type="text" id="meeting-link" readonly
+                value="{{ request.scheme }}://{{ request.get_host }}/chat/meeting/{{ meeting.id }}/"
+                style="flex:1; background:#111827; border:1px solid #374151; color:white; padding:8px; border-radius:6px; outline:none;">
+            <button class="btn-primary" onclick="copyLink()">Copy</button>
+        </div>
+        <div style="margin-top:16px; text-align:right;">
+            <button onclick="document.getElementById('invite-modal').style.display='none'"
+                style="background:none; border:none; color:#9ca3af; cursor:pointer;">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- Meeting Logic -->
+<script>
+    const MEETING_ID = "{{ meeting.id }}";
+    const USER_ID = "{{ user.id }}";
+    const IS_HOST = "{{ meeting.host.id }}" === "{{ user.id }}";
+
+    const USERNAME = "{{ user.username }}";
+    const WS_PROTOCOL = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const WS_URL = `${WS_PROTOCOL}//${window.location.host}/ws/meeting/${MEETING_ID}/`;
+
+    async function leaveMeeting() {
+        if (IS_HOST) {
+            const endForEveryone = confirm("End meeting for everyone?");
+            if (endForEveryone) {
+                try {
+                    await fetch(`/chat/api/meetings/${MEETING_ID}/end/`, {
+                        method: 'POST',
+                        headers: {
+                            'X-CSRFToken': getCookie('csrftoken')
+                        }
+                    });
+                } catch (e) { console.error(e); }
+            }
+        }
+        window.location.href = "/chat/";
+    }
+
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+
+    // TURN Config
+    // const TURN_CONFIG = {{ turn_config|safe }}; NOT USED YET
+    const ICE_SERVERS = {
+        iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' }
+        ]
+    };
+
+    let localStream;
+    let peers = {}; // Key: user_id, Value: { pc: RTCPeerConnection, stream: RemoteStream }
+    let socket;
+
+    // Elements
+    const localVideo = document.getElementById('local-video');
+    const videoGrid = document.getElementById('video-grid');
+
+    async function init() {
+        try {
+            // Get User Media
+            localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            localVideo.srcObject = localStream;
+        } catch (e) {
+            console.error("Error accessing media devices:", e);
+            alert("Could not access camera/microphone.");
+        }
+
+        // Connect WebSocket
+        connectSocket();
+    }
+
+    function connectSocket() {
+        socket = new WebSocket(WS_URL);
+
+        socket.onopen = () => {
+            console.log("Connected to Meeting Server");
+        };
+
+        socket.onmessage = async (e) => {
+            const data = JSON.parse(e.data);
+            handleSignalingData(data);
+        };
+
+        socket.onclose = () => {
+            console.log("Disconnected. Reconnecting...");
+            setTimeout(connectSocket, 2000);
+        };
+    }
+
+    async function handleSignalingData(data) {
+        switch (data.type) {
+            case 'user-joined':
+                console.log("User Joined:", data.username);
+                // Create Offer
+                createPeerConnection(data.user_id, true);
+                break;
+
+            case 'user-left':
+                console.log("User Left:", data.user_id);
+                removePeer(data.user_id);
+                break;
+
+            case 'signal':
+                await handleSignalMessage(data);
+                break;
+        }
+    }
+
+    // WebRTC Logic
+    async function createPeerConnection(remoteUserId, isInitiator) {
+        if (peers[remoteUserId]) return peers[remoteUserId];
+
+        const pc = new RTCPeerConnection(ICE_SERVERS);
+
+        // Add Local Tracks
+        if (localStream) {
+            localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+        }
+
+        // Handle Remote Tracks
+        pc.ontrack = (event) => {
+            const remoteStream = event.streams[0];
+            let videoContainer = document.getElementById(`video-container-${remoteUserId}`);
+
+            if (!videoContainer) {
+                // Create video element
+                videoContainer = document.createElement('div');
+                videoContainer.className = 'video-container';
+                videoContainer.id = `video-container-${remoteUserId}`;
+
+                const videoEl = document.createElement('video');
+                videoEl.autoplay = true;
+                videoEl.playsInline = true;
+                videoEl.srcObject = remoteStream;
+
+                const label = document.createElement('div');
+                label.className = 'video-label';
+                label.innerText = `User ${remoteUserId}`; // Could fetch real name if passed
+
+                videoContainer.appendChild(videoEl);
+                videoContainer.appendChild(label);
+                videoGrid.appendChild(videoContainer);
+            }
+        };
+
+        // ICE Candidates
+        pc.onicecandidate = (event) => {
+            if (event.candidate) {
+                sendSignal('candidate', { candidate: event.candidate }, remoteUserId);
+            }
+        };
+
+        peers[remoteUserId] = { pc: pc };
+
+        if (isInitiator) {
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            sendSignal('offer', { sdp: offer }, remoteUserId);
+        }
+
+        return pc;
+    }
+
+    async function handleSignalMessage(message) {
+        const { sender_id, data } = message;
+
+        let pc = peers[sender_id]?.pc;
+        if (!pc) {
+            // If we receive an offer, we are not initiator
+            pc = await createPeerConnection(sender_id, false);
+        }
+
+        if (data.sdp) {
+            await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+            if (data.sdp.type === 'offer') {
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                sendSignal('answer', { sdp: answer }, sender_id);
+            }
+        } else if (data.candidate) {
+            try {
+                await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+            } catch (e) {
+                console.error("Error adding Ice Candidate", e);
+            }
+        }
+    }
+
+    function sendSignal(type, data, targetUserId) {
+        socket.send(JSON.stringify({
+            type: 'signal',
+            target: targetUserId,
+            data: data
+        }));
+    }
+
+    function removePeer(userId) {
+        if (peers[userId]) {
+            peers[userId].pc.close();
+            delete peers[userId];
+        }
+        const el = document.getElementById(`video-container-${userId}`);
+        if (el) el.remove();
+    }
+
+    // UI Actions
+    document.getElementById('btn-mic').onclick = () => {
+        const track = localStream.getAudioTracks()[0];
+        track.enabled = !track.enabled;
+        document.getElementById('btn-mic').classList.toggle('inactive', !track.enabled);
+    };
+
+    document.getElementById('btn-cam').onclick = () => {
+        const track = localStream.getVideoTracks()[0];
+        track.enabled = !track.enabled;
+        document.getElementById('btn-cam').classList.toggle('inactive', !track.enabled);
+    };
+
+
+
+    function showInviteModal() {
+        document.getElementById('invite-modal').style.display = "flex";
+    }
+
+    function copyLink() {
+        const copyText = document.getElementById("meeting-link");
+        copyText.select();
+        document.execCommand("copy");
+        alert("Link copied!");
+    }
+
+    // Start
+    init();
+
+</script>
+{% endblock %}

@@ -181,6 +181,23 @@ else:
 # -------------------------------
 # Logging
 # -------------------------------
+# Determine the appropriate file handler based on OS
+# Windows has issues with RotatingFileHandler during runserver due to file locking [WinError 32]
+if os.name == 'nt':
+    LOGGING_FILE_HANDLER = {
+        'class': 'logging.FileHandler',
+        'filename': BASE_DIR / 'logs' / 'django.log',
+        'formatter': 'verbose',
+    }
+else:
+    LOGGING_FILE_HANDLER = {
+        'class': 'logging.handlers.RotatingFileHandler',
+        'filename': BASE_DIR / 'logs' / 'django.log',
+        'maxBytes': 1024 * 1024 * 10,
+        'backupCount': 10,
+        'formatter': 'verbose',
+    }
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
@@ -195,13 +212,7 @@ LOGGING = {
             'class': 'logging.StreamHandler',
             'formatter': 'verbose',
         },
-        'file': {
-            'class': 'logging.handlers.RotatingFileHandler',
-            'filename': BASE_DIR / 'logs' / 'django.log',
-            'maxBytes': 1024 * 1024 * 10,
-            'backupCount': 10,
-            'formatter': 'verbose',
-        },
+        'file': LOGGING_FILE_HANDLER,
     },
     'root': {
         'handlers': ['console', 'file'],

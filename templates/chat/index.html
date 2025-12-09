@@ -1997,6 +1997,36 @@
   </div>
 </div>
 
+<div id="host-meeting-overlay" class="compose-overlay hidden">
+  <div class="compose-modal" style="width: 450px;">
+    <div class="compose-title" style="display:flex; justify-content:space-between;">
+      <span>Start Meeting</span>
+      <button onclick="document.getElementById('host-meeting-overlay').classList.add('hidden')"
+        style="background:none; border:none; cursor:pointer; font-size:16px;">✕</button>
+    </div>
+
+    <div style="margin-bottom: 12px;">
+      <label
+        style="font-size:12px; font-weight:600; color:var(--text-light); display:block; margin-bottom:4px;">Title</label>
+      <input id="meeting-title-input" type="text" placeholder="Instant Meeting"
+        style="width:100%; padding:8px 12px; border:1px solid var(--border); border-radius:8px; font-family:inherit; font-size:13px; outline:none;" />
+    </div>
+
+    <div style="margin-bottom: 16px;">
+      <label style="font-size:12px; font-weight:600; color:var(--text-light); display:block; margin-bottom:4px;">Invite
+        Recent Chats (Optional)</label>
+      <div id="meeting-invite-list" class="compose-list"
+        style="max-height: 200px; border:1px solid var(--border); border-radius:8px; overflow-y:auto;">
+        <!-- Populated by JS -->
+      </div>
+    </div>
+
+    <div style="display:flex; justify-content:flex-end;">
+      <button id="start-meeting-btn" class="send-btn" style="width:100%;">Start & Invite</button>
+    </div>
+  </div>
+</div>
+
 <div id="call-overlay" class="compose-overlay hidden"
   style="align-items:center; justify-content:center; background:rgba(0,0,0,0.6)">
   <div class="compose-modal" style="width:720px; max-width:95vw; padding:0">
@@ -2169,7 +2199,7 @@
   </div>
 </div>
 
-<script src="{% static 'js/chat.js' %}?v={{ turn_config|length|add:20 }}"></script>
+<script src="{% static 'js/chat.js' %}?v={% now " U" %}"></script>
 <script src="{% static 'js/search.js' %}"></script>
 
 {% endblock %}

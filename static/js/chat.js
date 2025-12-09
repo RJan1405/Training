@@ -886,6 +886,114 @@ function createMessageElement(msg) {
     inviteCard.appendChild(title);
     inviteCard.appendChild(joinBtn);
     textEl.appendChild(inviteCard);
+  } else if (msg.text && msg.text.includes('[MEETING_INVITE]')) {
+    let payload = { title: 'New Meeting', id: '' };
+    try {
+      const marker = '[MEETING_INVITE]';
+      const jsonStr = msg.text.substring(msg.text.indexOf(marker) + marker.length);
+      payload = JSON.parse(jsonStr);
+    } catch (e) {
+      console.error('Failed to parse meeting invite:', e);
+    }
+
+    const inviteCard = document.createElement('div');
+    inviteCard.className = 'meeting-invite-card';
+    inviteCard.dataset.meetingId = payload.id;
+    inviteCard.style.padding = '12px';
+    inviteCard.style.borderRadius = '8px';
+    inviteCard.style.marginTop = '4px';
+
+    // Check status from serializer or default to active
+    const isEnded = (msg.meeting_status === 'ended');
+
+    if (isEnded) {
+      inviteCard.style.background = '#f3f4f6';
+      inviteCard.style.border = '1px solid #d1d5db';
+      inviteCard.classList.add('ended');
+    } else {
+      inviteCard.style.background = '#e0f2fe';
+      inviteCard.style.border = '1px solid #7dd3fc';
+    }
+
+    const title = document.createElement('div');
+    title.innerHTML = `<strong>🎥 ${escapeHtml(payload.title)}</strong><br><small>Hosted by ${escapeHtml(payload.host || 'User')}</small>`;
+    title.style.marginBottom = '8px';
+    title.style.fontSize = '14px';
+    title.style.color = isEnded ? '#6b7280' : '#0c4a6e';
+
+    const joinBtn = document.createElement('button');
+    joinBtn.style.border = 'none';
+    joinBtn.style.padding = '8px 16px';
+    joinBtn.style.borderRadius = '6px';
+    joinBtn.style.fontWeight = '600';
+
+    if (isEnded) {
+      joinBtn.textContent = 'Meeting Ended';
+      joinBtn.style.background = '#9ca3af';
+      joinBtn.style.color = 'white';
+      joinBtn.style.cursor = 'not-allowed';
+      joinBtn.disabled = true;
+    } else {
+      joinBtn.textContent = 'Join Meeting';
+      joinBtn.style.background = '#0284c7';
+      joinBtn.style.color = 'white';
+      joinBtn.style.cursor = 'pointer';
+      joinBtn.onclick = () => {
+        window.location.href = `/chat/meeting/${payload.id}/`;
+      };
+    }
+
+    inviteCard.appendChild(title);
+    inviteCard.appendChild(joinBtn);
+    textEl.appendChild(inviteCard);
+
+  } else if (msg.text && msg.text.includes('[MEETING_ENDED]')) {
+    let payload = {};
+    try {
+      const marker = '[MEETING_ENDED]';
+      const jsonStr = msg.text.substring(msg.text.indexOf(marker) + marker.length);
+      payload = JSON.parse(jsonStr);
+    } catch (e) { }
+
+    const endCard = document.createElement('div');
+    endCard.style.padding = '8px 12px';
+    endCard.style.background = '#f3f4f6';
+    endCard.style.border = '1px solid #d1d5db';
+    endCard.style.borderRadius = '8px';
+    endCard.style.color = '#6b7280';
+    endCard.style.fontSize = '13px';
+    endCard.style.fontWeight = '500';
+    endCard.style.display = 'flex';
+    endCard.style.alignItems = 'center';
+    endCard.style.gap = '8px';
+    endCard.innerHTML = '<span>🏁</span> <span>Meeting has ended</span>';
+    textEl.appendChild(endCard);
+
+    // Disable specific meeting card in this chat history
+    const disableCard = () => {
+      if (!payload.id) return;
+      const container = document.getElementById('messages-container');
+      if (container) {
+        const invites = container.querySelectorAll(`.meeting-invite-card[data-meeting-id="${payload.id}"]`);
+        invites.forEach(invite => {
+          if (invite.classList.contains('ended')) return;
+          invite.classList.add('ended');
+          const btn = invite.querySelector('button');
+          if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'Meeting Ended';
+            btn.style.background = '#9ca3af';
+            btn.style.cursor = 'not-allowed';
+            btn.onclick = null;
+          }
+        });
+      }
+    };
+
+    // Run immediately and after a delay to catch race conditions during load
+    setTimeout(disableCard, 0);
+    setTimeout(disableCard, 500);
+
   } else if (msg.text === '[PROJECT_MEETING_ENDED]') {
     const endCard = document.createElement('div');
     endCard.style.padding = '8px 12px';
@@ -3361,15 +3469,7 @@ function setupGroupCreationListeners() {
     };
   }
 
-  const hostMeetingItem = document.getElementById('menu-host-meeting');
-  if (hostMeetingItem) {
-    hostMeetingItem.onclick = (e) => {
-      e.stopPropagation();
-      if (dropdown) dropdown.classList.remove('active');
-      // For now, treat Host Meeting like creating a group to meet in
-      openGroupCreationModal();
-    };
-  }
+
 
 
 
@@ -3718,3 +3818,123 @@ async function uploadAvatar(file) {
     alert('Error uploading avatar');
   }
 }
+
+/* ============================================================
+   HOST MEETING HANDLER
+   ============================================================ */
+document.addEventListener('DOMContentLoaded', () => {
+  const hostMeetingBtn = document.getElementById('menu-host-meeting');
+  const overlay = document.getElementById('host-meeting-overlay');
+  const startBtn = document.getElementById('start-meeting-btn');
+  const inviteList = document.getElementById('meeting-invite-list');
+
+  if (hostMeetingBtn && overlay) {
+    hostMeetingBtn.onclick = () => {
+      // Close menu
+      const menu = document.getElementById('header-menu-dropdown');
+      if (menu) menu.classList.remove('active');
+
+      // Show modal
+      overlay.classList.remove('hidden');
+      overlay.style.display = 'flex';
+
+      // Populate recipients
+      populateMeetingInvites();
+    };
+
+    startBtn.onclick = async () => {
+      const titleInput = document.getElementById('meeting-title-input');
+      const title = titleInput.value.trim() || 'Instant Meeting';
+
+      // Gather selected invites
+      const checkboxes = inviteList.querySelectorAll('input.meeting-invite-cb:checked');
+      const invites = Array.from(checkboxes).map(cb => ({
+        type: cb.dataset.type,
+        id: cb.dataset.id
+      }));
+
+      startBtn.disabled = true;
+      startBtn.textContent = 'Starting...';
+
+      try {
+        const formData = new FormData();
+        formData.append('title', title);
+        formData.append('invites', JSON.stringify(invites));
+
+        const res = await fetch(`${API_BASE}/meetings/create/`, {
+          method: 'POST',
+          body: formData,
+          headers: { 'X-CSRFToken': getCSRFToken() }
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          overlay.classList.add('hidden');
+          overlay.style.display = 'none';
+          if (data.redirect_url) {
+            window.location.href = data.redirect_url;
+          }
+        } else {
+          console.error("Failed", res.status);
+          alert("Failed to start meeting");
+        }
+      } catch (e) {
+        console.error(e);
+        alert("Error starting meeting");
+      } finally {
+        startBtn.disabled = false;
+        startBtn.textContent = 'Start & Invite';
+      }
+    };
+  }
+
+  function populateMeetingInvites() {
+    inviteList.innerHTML = '<div style="padding:10px; text-align:center; color:#9ca3af">Loading chats...</div>';
+
+    fetch(`${API_BASE}/messages/recent_chats/`, { headers: defaultHeaders() })
+      .then(res => res.json())
+      .then(items => {
+        inviteList.innerHTML = '';
+        if (!items || items.length === 0) {
+          inviteList.innerHTML = '<div style="padding:10px; text-align:center; color:#9ca3af">No recent chats found</div>';
+          return;
+        }
+
+        items.forEach(item => {
+          const div = document.createElement('div');
+          div.className = 'menu-item'; // reuse style
+          div.style.padding = "8px";
+
+          let name = "Unknown";
+          let type = "user";
+          let id = 0;
+
+          if (item.type === 'user') {
+            name = item.user.first_name ? `${item.user.first_name} ${item.user.last_name}` : item.user.username;
+            type = 'user';
+            id = item.user.id;
+          } else {
+            name = item.project.name;
+            type = 'project';
+            id = item.project.id;
+          }
+
+          div.innerHTML = `
+                <input type="checkbox" class="meeting-invite-cb" data-type="${type}" data-id="${id}" style="margin-right:10px;">
+                <span>${escapeHtml(name)} <small style="color:#9ca3af">(${type})</small></span>
+             `;
+          div.onclick = (e) => {
+            if (e.target.type !== 'checkbox') {
+              const cb = div.querySelector('input');
+              cb.checked = !cb.checked;
+            }
+          };
+
+          inviteList.appendChild(div);
+        });
+      })
+      .catch(e => {
+        inviteList.innerHTML = '<div style="padding:10px; text-align:center; color:red">Error loading chats</div>';
+      });
+  }
+});

@@ -12,6 +12,9 @@ from django.db.models import Q, F
 from django.views.generic import TemplateView
 from django.utils.decorators import method_decorator
 from django.utils import timezone
+from django.conf import settings
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
 from .models import Message, Project
 from .serializers import (
     MessageSerializer, UserSerializer, ProjectSerializer,
@@ -371,3 +374,222 @@ def send_message_test(request):
         "receiver": receiver.id if receiver else None,
         "project": project.id if project else None,
     }, status=201)
+# ==================== MEETING VIEWS ====================
+
+@login_required(login_url='login')
+def meeting_room(request, meeting_id):
+    """
+    Render detailed meeting room page (separate from chat).
+    """
+    from .models import Meeting, MeetingInvitation
+    
+    try:
+        meeting = Meeting.objects.get(id=meeting_id)
+    except Meeting.DoesNotExist:
+        return render(request, 'chat/index.html', {'error': 'Meeting not found'})
+    
+    # Ensure user has permission (host or invited)
+    is_host = (meeting.host == request.user)
+    is_invited = MeetingInvitation.objects.filter(meeting=meeting, user=request.user).exists()
+    
+    if not is_host and not is_invited:
+        # Auto-invite if it's an "open" meeting or just let them in for now?
+        # For this implementation, we'll auto-invite them if they have the link
+        # This acts like a "Join" action
+        MeetingInvitation.objects.create(
+            meeting=meeting, 
+            user=request.user, 
+            invited_by=meeting.host, # Assumed host invited via link
+            accepted=True
+        )
+
+    return render(request, 'chat/meeting_room.html', {
+        'meeting': meeting,
+        'user': request.user,
+        'turn_config': settings.TURN_CONFIG if hasattr(settings, 'TURN_CONFIG') else []
+    })
+
+@csrf_exempt
+@login_required
+def create_meeting(request):
+    """
+    API to start a new dedicated meeting.
+    POST /chat/api/meetings/create/
+    Body: title, description, invites (JSON string of [{type: 'user'|'project', id: ...}])
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+        
+    from .models import Meeting, MeetingInvitation
+    from channels.layers import get_channel_layer
+    from asgiref.sync import async_to_sync
+    import json
+    
+    title = request.POST.get("title", f"Meeting by {request.user.username}")
+    description = request.POST.get("description", "")
+    invites_json = request.POST.get("invites", "[]")
+    
+    try:
+        invites = json.loads(invites_json)
+    except:
+        invites = []
+    
+    meeting = Meeting.objects.create(
+        host=request.user,
+        title=title,
+        description=description,
+        status='started',
+        scheduled_at=timezone.now()
+    )
+    
+    MeetingInvitation.objects.create(
+        meeting=meeting,
+        user=request.user,
+        invited_by=request.user,
+        accepted=True
+    )
+    
+    channel_layer = get_channel_layer()
+    
+    for item in invites:
+        target_type = item.get('type')
+        target_id = item.get('id')
+        
+        if not target_id:
+            continue
+            
+        invite_payload = json.dumps({
+            "id": str(meeting.id),
+            "title": meeting.title,
+            "host": request.user.username
+        })
+        message_text = f"[MEETING_INVITE] {invite_payload}"
+        
+        try:
+            if target_type == 'user':
+                receiver = User.objects.get(id=target_id)
+                msg = Message(sender=request.user, receiver=receiver)
+                msg.text = message_text
+                msg.save()
+                
+                MeetingInvitation.objects.get_or_create(
+                    meeting=meeting,
+                    user=receiver,
+                    defaults={'invited_by': request.user}
+                )
+                
+                # Broadcast DM
+                group_name = f"chat_dm_{min(request.user.id, receiver.id)}_{max(request.user.id, receiver.id)}"
+                async_to_sync(channel_layer.group_send)(group_name, {
+                    "type": "chat_message",
+                    "id": msg.id,
+                    "sender": request.user.id,
+                    "sender_id": request.user.id,
+                    "sender_username": request.user.username,
+                    "text": msg.text,
+                    "timestamp": msg.timestamp.isoformat() if msg.timestamp else timezone.now().isoformat(),
+                    "receiver": receiver.id
+                })
+                
+            elif target_type == 'project':
+                project = Project.objects.get(id=target_id)
+                msg = Message(sender=request.user, project=project)
+                msg.text = message_text
+                msg.save()
+                
+                # Broadcast Project
+                group_name = f"chat_project_{project.id}"
+                async_to_sync(channel_layer.group_send)(group_name, {
+                    "type": "project_message",
+                    "id": msg.id,
+                    "sender": request.user.id,
+                    "sender_id": request.user.id,
+                    "sender_username": request.user.username,
+                    "project_id": project.id,
+                    "text": msg.text,
+                    "timestamp": msg.timestamp.isoformat() if msg.timestamp else timezone.now().isoformat()
+                })
+        except Exception as e:
+            print(f"Error inviting {target_type} {target_id}: {e}")
+            continue
+
+    return JsonResponse({
+        "status": "success",
+        "meeting_id": str(meeting.id),
+        "redirect_url": f"/chat/meeting/{meeting.id}/"
+    })
+
+@csrf_exempt
+@login_required
+def end_meeting(request, meeting_id):
+    """
+    API to end a meeting and notify participants.
+    POST /chat/api/meetings/<id>/end/
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+        
+    from .models import Meeting
+    from channels.layers import get_channel_layer
+    from asgiref.sync import async_to_sync
+    import json
+    
+    meet = get_object_or_404(Meeting, id=meeting_id, host=request.user)
+    meet.status = 'ended'
+    meet.ended = True
+    meet.save()
+    
+    match_str = f'"{meet.id}"' 
+    messages = Message.objects.filter(text__contains=match_str, sender=request.user)
+    
+    processed_targets = set()
+    channel_layer = get_channel_layer()
+    
+    for m in messages:
+        target_key = f"u_{m.receiver_id}" if m.receiver else f"p_{m.project_id}"
+        if target_key in processed_targets:
+            continue
+            
+        processed_targets.add(target_key)
+        
+        end_payload = json.dumps({"id": str(meet.id)})
+        end_text = f"[MEETING_ENDED] {end_payload}"
+        
+        try:
+            if m.receiver:
+                msg = Message(sender=request.user, receiver=m.receiver)
+                msg.text = end_text
+                msg.save()
+                
+                group_name = f"chat_dm_{min(request.user.id, m.receiver.id)}_{max(request.user.id, m.receiver.id)}"
+                async_to_sync(channel_layer.group_send)(group_name, {
+                    "type": "chat_message",
+                    "id": msg.id,
+                    "sender": request.user.id,
+                    "sender_id": request.user.id,
+                    "sender_username": request.user.username,
+                    "text": msg.text,
+                    "timestamp": msg.timestamp.isoformat() if msg.timestamp else timezone.now().isoformat(),
+                    "receiver": m.receiver.id
+                })
+                
+            elif m.project:
+                msg = Message(sender=request.user, project=m.project)
+                msg.text = end_text
+                msg.save()
+                
+                group_name = f"chat_project_{m.project.id}"
+                async_to_sync(channel_layer.group_send)(group_name, {
+                    "type": "project_message",
+                    "id": msg.id,
+                    "sender": request.user.id,
+                    "sender_id": request.user.id,
+                    "sender_username": request.user.username,
+                    "project_id": m.project.id,
+                    "text": msg.text,
+                    "timestamp": msg.timestamp.isoformat() if msg.timestamp else timezone.now().isoformat()
+                })
+        except Exception as e:
+            print(f"Error ending meeting notification: {e}")
+
+    return JsonResponse({"status": "success"})

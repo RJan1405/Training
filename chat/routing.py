@@ -13,4 +13,7 @@ websocket_urlpatterns = [
 
     # User notifications
     re_path(r'ws/notify/$', consumers.NotifyConsumer.as_asgi()),
+
+    # Dedicated Meeting (Host Meeting)
+    re_path(r'ws/meeting/(?P<meeting_id>[^/]+)/$', consumers.MeetingConsumer.as_asgi()),
 ]

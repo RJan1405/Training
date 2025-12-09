@@ -745,6 +745,7 @@ class NotifyConsumer(AsyncWebsocketConsumer):
         except Exception:
             logger.exception("notify _forward_rtc: group_send failed")
 
+
     async def rtc_signal_notify(self, event):
         try:
             await self.send(text_data=json.dumps({
@@ -758,3 +759,102 @@ class NotifyConsumer(AsyncWebsocketConsumer):
             }))
         except Exception:
             logger.exception("notify rtc_signal_notify: send failed")
+
+
+# ----------------------------
+# Meeting Consumer (Dedicated Host Meeting)
+# ----------------------------
+class MeetingConsumer(AsyncWebsocketConsumer):
+    """
+    Consumer for dedicated meetings (Host Meeting feature).
+    URL: ws/meeting/<meeting_id>/
+    """
+    async def connect(self):
+        self.meeting_id = self.scope['url_route']['kwargs']['meeting_id']
+        self.room_group_name = f'meeting_{self.meeting_id}'
+        self.user = self.scope.get('user')
+
+        if not self.user or not self.user.is_authenticated:
+            await self.close()
+            return
+
+        await self.channel_layer.group_add(
+            self.room_group_name,
+            self.channel_name
+        )
+        await self.accept()
+
+        # Notify others that I have joined
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                'type': 'user_joined',
+                'user_id': self.user.id,
+                'username': self.user.username
+            }
+        )
+
+    async def disconnect(self, close_code):
+        # Notify others that I have left
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                'type': 'user_left',
+                'user_id': self.user.id
+            }
+        )
+        await self.channel_layer.group_discard(
+            self.room_group_name,
+            self.channel_name
+        )
+
+    async def receive(self, text_data):
+        data = json.loads(text_data)
+        message_type = data.get('type')
+
+        if message_type == 'signal':
+            # Relay WebRTC signal to the targeting peer or broadcast
+            # Expected payload: { 'type': 'signal', 'target': user_id, 'data': {...} }
+            target_id = data.get('target')
+            if target_id:
+                # Optimized: ideally we'd send only to target's channel, but for simple Mesh 
+                # we broadcast and let clients filter by 'target'
+                await self.channel_layer.group_send(
+                    self.room_group_name,
+                    {
+                        'type': 'signal_message',
+                        'sender_id': self.user.id,
+                        'target_id': target_id,
+                        'data': data.get('data')
+                    }
+                )
+
+    # Handlers for group messages
+    async def user_joined(self, event):
+        # Don't send back to self
+        if event['user_id'] == self.user.id:
+            return
+        await self.send(text_data=json.dumps({
+            'type': 'user-joined',
+            'user_id': event['user_id'],
+            'username': event['username']
+        }))
+
+    async def user_left(self, event):
+        if event['user_id'] == self.user.id:
+            return
+        await self.send(text_data=json.dumps({
+            'type': 'user-left',
+            'user_id': event['user_id']
+        }))
+
+    async def signal_message(self, event):
+        # Only send if I am the target
+        if event['target_id'] != self.user.id:
+            return
+        
+        await self.send(text_data=json.dumps({
+            'type': 'signal',
+            'sender_id': event['sender_id'],
+            'data': event['data']
+        }))
