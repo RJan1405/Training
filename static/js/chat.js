@@ -369,6 +369,19 @@ async function loadChatWindow(type, id) {
     const statusText = isOnline ? '● Online' : '● Offline';
 
     const mediaToggleBtn = '<button id="media-toggle-header-btn" title="Media" style="display:flex;align-items:center;justify-content:center;margin-left:6px;border:none;background:#e5e7eb;color:#374151;border-radius:8px;width:32px;height:32px;cursor:pointer;transition:all 0.2s"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></button>';
+
+    let membersBtn = '';
+    if (type === 'project') {
+      membersBtn = `<button id="members-header-btn" class="mobile-chat-action-btn" title="View Members">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+            <circle cx="9" cy="7" r="4"></circle>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+          </svg>
+       </button>`;
+    }
+
     let callBtns = '';
     if (type === 'user') {
       callBtns = `
@@ -385,7 +398,7 @@ async function loadChatWindow(type, id) {
         <div class="call-buttons">
           <button id="project-meeting-btn" style="background:#2563eb; color:white; border:none; border-radius:8px; padding:8px 14px; font-size:13px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:8px; box-shadow:0 1px 3px rgba(0,0,0,0.1); transition: all 0.2s">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
-            <span>Join Meeting</span>
+            <span class="join-meeting-text">Join Meeting</span>
           </button>
         </div>`;
     }
@@ -420,6 +433,7 @@ async function loadChatWindow(type, id) {
             <button id="message-search-btn" style="display:flex;align-items:center;justify-content:center;border:none;background:#f3f4f6;color:#374151;border-radius:8px;width:36px;height:36px;cursor:pointer;transition:all 0.2s">
               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             </button>
+            ${membersBtn}
             ${mediaToggleBtn}
             ${callBtns}
         </div>
@@ -465,6 +479,7 @@ async function loadChatWindow(type, id) {
     }
     setupMessageSearchPanel();
     setupMediaToggle();
+    setupMembersButton();
     setupCallButtons();
     setupReadReceiptObservers(messagesContainer);
     scrollToBottom();
@@ -574,6 +589,9 @@ function setupMediaToggle() {
   const btn = document.getElementById('media-toggle-header-btn');
   if (!btn) return;
   btn.onclick = async () => {
+    const rs = document.getElementById('right-sidebar');
+    if (rs) rs.classList.add('active'); // Force show on mobile
+
     const mainContainer = document.getElementById('main-container');
     const chatInfoSection = document.getElementById('chat-info-section');
     const filesSection = document.getElementById('files-section');
@@ -600,37 +618,41 @@ function setupMediaToggle() {
       return;
     }
 
-    // For 1-to-1 chats, toggle media view
-    const isOpen = mediaSection && mediaSection.style.display !== 'none';
-    if (isOpen) {
+    // For DM, toggle between Files and Media
+    const isFilesShowing = filesSection && filesSection.style.display !== 'none';
+    if (isFilesShowing) {
+      if (filesSection) filesSection.style.display = 'none';
+      if (mediaSection) mediaSection.style.display = 'flex';
+      await renderMediaGallery(currentChatType, currentChatId);
+    } else {
       if (mediaSection) mediaSection.style.display = 'none';
-      if (currentChatType === 'project') {
-        showRightSidebar();
-        if (mainContainer) mainContainer.classList.remove('no-right-sidebar');
-        if (chatInfoSection) chatInfoSection.style.display = 'none';
-        if (filesSection) filesSection.style.display = 'none';
-        if (membersHeader) membersHeader.style.display = 'flex';
-        if (membersList) membersList.style.display = '';
-      } else {
-        hideRightSidebar();
-        if (mainContainer) mainContainer.classList.add('no-right-sidebar');
-        if (chatInfoSection) chatInfoSection.style.display = 'none';
-        if (filesSection) filesSection.style.display = 'none';
-        if (membersHeader) membersHeader.style.display = 'none';
-        if (membersList) membersList.style.display = 'none';
-      }
-      return;
+      if (filesSection) filesSection.style.display = '';
     }
+  };
+}
 
-    showRightSidebar();
-    if (mainContainer) mainContainer.classList.remove('no-right-sidebar');
+function setupMembersButton() {
+  const btn = document.getElementById('members-header-btn');
+  if (!btn) return;
+
+  btn.onclick = () => {
+    const rs = document.getElementById('right-sidebar');
+    if (rs) rs.classList.add('active'); // Force show on mobile
+
+    const chatInfoSection = document.getElementById('chat-info-section');
+    const filesSection = document.getElementById('files-section');
+    const membersHeader = document.getElementById('members-header');
+    const membersList = document.getElementById('members-list');
+    const mediaSection = document.getElementById('media-section');
+
+    // Hide others
     if (chatInfoSection) chatInfoSection.style.display = 'none';
     if (filesSection) filesSection.style.display = 'none';
-    if (membersHeader) membersHeader.style.display = 'none';
-    if (membersList) membersList.style.display = 'none';
-    if (mediaSection) mediaSection.style.display = 'flex';
+    if (mediaSection) mediaSection.style.display = 'none';
 
-    await renderMediaGallery(currentChatType, currentChatId);
+    // Show members
+    if (membersHeader) membersHeader.style.display = 'flex';
+    if (membersList) membersList.style.display = '';
   };
 }
 

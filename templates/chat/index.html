@@ -1831,8 +1831,22 @@
     }
 
     #right-sidebar {
-      display: none !important;
-      /* Hide right sidebar on mobile for now, or use overlay */
+      display: none;
+      position: fixed;
+      top: 0;
+      right: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 2000;
+      background: var(--surface);
+    }
+
+    #right-sidebar.active {
+      display: flex !important;
+    }
+
+    #close-right-sidebar {
+      display: block !important;
     }
 
     /* Active Chat State: Hide Chat List, Show Chat Area */
@@ -1925,6 +1939,74 @@
     100% {
       transform: scale(1);
       box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+    }
+  }
+
+  .mobile-chat-action-btn {
+    display: none !important;
+  }
+
+  @media (max-width: 768px) {
+    .mobile-chat-action-btn {
+      display: flex !important;
+      align-items: center;
+      justify-content: center;
+      margin-left: 0 !important;
+      /* Reset margin */
+      border: none;
+      background: #e5e7eb;
+      color: #374151;
+      border-radius: 8px;
+      width: 32px;
+      height: 32px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .mobile-chat-action-btn:hover {
+      background: #d1d5db;
+    }
+
+    /* Compact Header on Mobile */
+    .join-meeting-text {
+      display: none !important;
+    }
+
+    .chat-header-actions {
+      gap: 4px !important;
+    }
+
+    /* Force smaller buttons in header for mobile */
+    .header-action-btn,
+    #media-toggle-header-btn,
+    #message-search-btn {
+      width: 32px !important;
+      height: 32px !important;
+      margin-left: 0 !important;
+      padding: 0 !important;
+    }
+
+    /* Adjust Join Meeting Button for icon-only style */
+    #project-meeting-btn {
+      padding: 0 !important;
+      width: 32px;
+      height: 32px;
+      justify-content: center;
+      gap: 0 !important;
+    }
+
+    /* Padding for back button in sidebar */
+    .files-header,
+    .members-header,
+    .media-header {
+      padding-left: 40px !important;
+    }
+
+    /* Ensure chat info (if visible) also respects it, though usually hidden/modal */
+    .chat-info-section {
+      padding-left: 40px !important;
+      padding-right: 20px !important;
+      /* Balance it slightly or just keep it simple */
     }
   }
 </style>
@@ -2026,6 +2108,17 @@
 
   <!-- RIGHT SIDEBAR: Chat Info, Files, Members -->
   <div id="right-sidebar" class="hidden">
+    <!-- Mobile Close Button -->
+    <button id="close-right-sidebar" class="mobile-only-btn"
+      onclick="document.getElementById('right-sidebar').classList.remove('active')"
+      style="position:absolute; top:12px; left:4px; z-index:20; background:none; border:none; color:var(--text); width:32px; height:32px; display:flex; align-items:center; justify-content:center; cursor:pointer; display:none;">
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="19" y1="12" x2="5" y2="12"></line>
+        <polyline points="12 19 5 12 12 5"></polyline>
+      </svg>
+    </button>
+
     <!-- Chat Info Section -->
     <div class="chat-info-section" id="chat-info-section">
       <div class="chat-info-avatar" id="chat-info-avatar">U</div>
